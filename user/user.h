@@ -29,8 +29,8 @@ int uptime(void);
 #ifdef LAB_NET
 int bind(uint32);
 int unbind(uint32);
-int send(uint32, uint32, uint32, char *, uint32);
-int recv(uint32, uint32*, uint32*, char *, uint32);
+int send(uint32, uint32, uint32, char*, uint32);
+int recv(uint32, uint32*, uint32*, char*, uint32);
 #endif
 #ifdef LAB_PGTBL
 int ugetpid(void);
@@ -41,17 +41,17 @@ void kpgtbl(void);
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);
-void *memmove(void*, const void*, int);
+void* memmove(void*, const void*, int);
 char* strchr(const char*, char c);
 int strcmp(const char*, const char*);
-void fprintf(int, const char*, ...) __attribute__ ((format (printf, 2, 3)));
-void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
+void fprintf(int, const char*, ...) __attribute__((format(printf, 2, 3)));
+void printf(const char*, ...) __attribute__((format(printf, 1, 2)));
 char* gets(char*, int max);
 uint strlen(const char*);
 void* memset(void*, int, uint);
 int atoi(const char*);
-int memcmp(const void *, const void *, uint);
-void *memcpy(void *, const void *, uint);
+int memcmp(const void*, const void*, uint);
+void* memcpy(void*, const void*, uint);
 #ifdef LAB_LOCK
 int statistics(void*, int);
 #endif
