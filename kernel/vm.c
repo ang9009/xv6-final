@@ -232,20 +232,23 @@ void uvmfirst(pagetable_t pagetable, uchar* src, uint sz) {
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) {
   char* mem;
-  uint64 a;
-  int sz;
+  uint64 a = oldsz;
+  uint sz;
 
   if (newsz < oldsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
-  for (a = oldsz; a < newsz; a += sz) {
-    if (a % SUPERPAGE_SIZE == 0) {
+  while (a < newsz) {
+    if (a % SUPERPAGE_SIZE == 0 && (a + SUPERPAGE_SIZE) <= newsz) {
       sz = SUPERPAGE_SIZE;
+      mem = superalloc();
     } else {
       sz = PGSIZE;
+      mem = kalloc();
     }
-    mem = kalloc();
+
+    // Not done
     if (mem == 0) {
       uvmdealloc(pagetable, a, oldsz);
       return 0;
@@ -258,6 +261,9 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) {
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    // Not done
+
+    a += sz;
   }
   return newsz;
 }

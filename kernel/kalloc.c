@@ -10,8 +10,6 @@
 #include "defs.h"
 
 void freerange(void* pa_start, void* pa_end);
-void* superalloc(void);
-void superfree(void* pa);
 
 extern char end[];  // first address after kernel.
                     // defined by kernel.ld.
@@ -36,7 +34,7 @@ void freerange(void* pa_start, void* pa_end) {
   p = (char*)PGROUNDUP((uint64)pa_start);
 
   int superpg_count = 0;
-  while (p <= (char*)pa_end) {
+  while (p + PGSIZE <= (char*)pa_end) {
     if (superpg_count < 4 && (uint64)p % SUPERPAGE_SIZE == 0 &&
         (p + SUPERPAGE_SIZE) <= (char*)pa_end) {
       superfree(p);
