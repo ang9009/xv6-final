@@ -216,10 +216,12 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa,
   return 0;
 }
 
-// Checks if the provided VA points to a superpage
-// Checks if the provided VA points to a superpage. Assumes the second level PTE is valid.
+// Checks if the provided VA points to a superpage.
 bool is_superpage(pagetable_t pagetable, uint64 va) {
   pte_t lvl2_pte = pagetable[PX(2, va)];
+  if ((lvl2_pte & PTE_V) == 0) {
+    return false;
+  }
   pagetable_t lvl1_pgtbl = (pagetable_t)PTE2PA(lvl2_pte);
   pte_t lvl1_pte = lvl1_pgtbl[PX(1, va)];
 
@@ -238,18 +240,29 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) {
     panic("uvmunmap: not aligned");
 
   for (a = va; a < va + npages * PGSIZE; a += sz) {
-    sz = PGSIZE;
-    if ((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+    bool superpage = is_superpage(pagetable, a);
+    if (superpage) {
+      sz = SUPERPAGE_SIZE;
+      if ((pte = walk(pagetable, a, 0)) == 0) {
+        panic("uvmunmap: walk");
+      }
+    } else {
+      sz = PGSIZE;
+      if ((pte = walk_superpage(pagetable, a)) == 0) {
+        panic("uvmunmap: walk_superpage");
+      }
+    }
+
     if ((*pte & PTE_V) == 0) {
       printf("va=%ld pte=%ld\n", a, *pte);
       panic("uvmunmap: not mapped");
     }
-    if (PTE_FLAGS(*pte) == PTE_V)
+    if (PTE_FLAGS(*pte) == PTE_V) {
       panic("uvmunmap: not a leaf");
+    }
     if (do_free) {
       uint64 pa = PTE2PA(*pte);
-      if (is_superpage(pagetable, va)) {
+      if (superpage) {
         superfree((void*)pa);
       } else {
         kfree((void*)pa);
@@ -378,19 +391,28 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
   int szinc;
 
   for (i = 0; i < sz; i += szinc) {
-    szinc = PGSIZE;
-    szinc = PGSIZE;
-    if ((pte = walk(old, i, 0)) == 0)
+    bool superpage = is_superpage(old, i);
+    szinc = superpage ? SUPERPAGE_SIZE : PGSIZE;
+    pte = superpage ? walk_superpage(old, i) : walk(old, i, 0);
+    if (pte == 0) {
       panic("uvmcopy: pte should exist");
-    if ((*pte & PTE_V) == 0)
+    }
+    if ((*pte & PTE_V) == 0) {
       panic("uvmcopy: page not present");
+    }
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if ((mem = kalloc()) == 0)
+    mem = superpage ? superalloc() : kalloc();
+    if (mem == 0) {
+      printf("uvmcopy: couldn't allocate page. superpage: %d\n", superpage);
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
-      kfree(mem);
+    }
+
+    memmove(mem, (char*)pa, szinc);
+    if (mappages(new, i, szinc, (uint64)mem, flags) != 0) {
+      superpage ? superfree(mem) : kfree(mem);
+      printf("uvmcopy: couldn't map pages\n");
       goto err;
     }
   }

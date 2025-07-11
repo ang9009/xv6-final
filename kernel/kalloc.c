@@ -35,7 +35,7 @@ void freerange(void* pa_start, void* pa_end) {
 
   int superpg_count = 0;
   while (p + PGSIZE <= (char*)pa_end) {
-    if (superpg_count < 4 && (uint64)p % SUPERPAGE_SIZE == 0 &&
+    if (superpg_count < 20 && (uint64)p % SUPERPAGE_SIZE == 0 &&
         (p + SUPERPAGE_SIZE) <= (char*)pa_end) {
       superfree(p);
       p += SUPERPAGE_SIZE;
