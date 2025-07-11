@@ -8,6 +8,8 @@
 #include "proc.h"
 #include "fs.h"
 
+#include <stdbool.h>
+
 /*
  * the kernel's page table.
  */
@@ -126,6 +128,7 @@ uint64 walkaddr(pagetable_t pagetable, uint64 va) {
   if ((*pte & PTE_V) == 0)
     return 0;
   if ((*pte & PTE_U) == 0)
+
     return 0;
   pa = PTE2PA(*pte);
   return pa;
@@ -139,6 +142,34 @@ void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm) {
     panic("kvmmap");
 }
 
+pte_t* walk_superpage(pagetable_t pagetable, uint64 va) {
+  if (va >= MAXVA)
+    panic("walk");
+
+  for (int level = 2; level > 0; level--) {
+    pte_t* pte = &pagetable[PX(level, va)];
+    if (*pte & PTE_V) {
+      pagetable = (pagetable_t)PTE2PA(*pte);
+#ifdef LAB_PGTBL
+      if (level == 1 && PTE_LEAF(*pte)) {
+        return pte;
+      }
+#endif
+    } else {
+      if (level == 1) {
+        return pte;
+      }
+
+      if ((pagetable = (pde_t*)kalloc()) == 0) {
+        return 0;
+      }
+      memset(pagetable, 0, PGSIZE);
+      *pte = PA2PTE(pagetable) | PTE_V;
+    }
+  }
+  return &pagetable[PX(0, va)];
+}
+
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa.
 // va and size MUST be page-aligned.
@@ -149,8 +180,10 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa,
   uint64 a, last;
   pte_t* pte;
 
-  if ((va % PGSIZE) != 0)
+  if ((va % PGSIZE) != 0) {
+    printf("mappages va: %ld\n", va);
     panic("mappages: va not aligned");
+  }
 
   if ((size % PGSIZE) != 0)
     panic("mappages: size not aligned");
@@ -159,6 +192,15 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa,
     panic("mappages: size");
 
   a = va;
+  if (size == SUPERPAGE_SIZE) {
+    if ((pte = walk_superpage(pagetable, a)) == 0)
+      return -1;
+    if (*pte & PTE_V)
+      panic("mappages: remap");
+    *pte = PA2PTE(pa) | perm | PTE_V | PTE_R;
+    return 0;
+  }
+
   last = va + size - PGSIZE;
   for (;;) {
     if ((pte = walk(pagetable, a, 1)) == 0)
@@ -174,7 +216,17 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa,
   return 0;
 }
 
-// Remove npages of mappings starting from va. va must be
+// Checks if the provided VA points to a superpage
+// Checks if the provided VA points to a superpage. Assumes the second level PTE is valid.
+bool is_superpage(pagetable_t pagetable, uint64 va) {
+  pte_t lvl2_pte = pagetable[PX(2, va)];
+  pagetable_t lvl1_pgtbl = (pagetable_t)PTE2PA(lvl2_pte);
+  pte_t lvl1_pte = lvl1_pgtbl[PX(1, va)];
+
+  return (lvl1_pte & (PTE_V | PTE_R)) == (PTE_V | PTE_R);
+}
+
+// Remove npages (normal sized) of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
 void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) {
@@ -197,7 +249,11 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) {
       panic("uvmunmap: not a leaf");
     if (do_free) {
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      if (is_superpage(pagetable, va)) {
+        superfree((void*)pa);
+      } else {
+        kfree((void*)pa);
+      }
     }
     *pte = 0;
   }
@@ -232,13 +288,12 @@ void uvmfirst(pagetable_t pagetable, uchar* src, uint sz) {
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) {
   char* mem;
-  uint64 a = oldsz;
   uint sz;
-
   if (newsz < oldsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
+  uint64 a = oldsz;
   while (a < newsz) {
     if (a % SUPERPAGE_SIZE == 0 && (a + SUPERPAGE_SIZE) <= newsz) {
       sz = SUPERPAGE_SIZE;
@@ -248,7 +303,6 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) {
       mem = kalloc();
     }
 
-    // Not done
     if (mem == 0) {
       uvmdealloc(pagetable, a, oldsz);
       return 0;
@@ -256,12 +310,12 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) {
 #ifndef LAB_SYSCALL
     memset(mem, 0, sz);
 #endif
+    // printf("uvmalloc call mappages, va: %ld\n", a);
     if (mappages(pagetable, a, sz, (uint64)mem, PTE_R | PTE_U | xperm) != 0) {
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
-    // Not done
 
     a += sz;
   }
