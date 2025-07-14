@@ -56,18 +56,18 @@ static void printptr(uint64 x) {
 }
 
 void backtrace() {
-  uint64* curr_fp = (uint64*)r_fp();
-  uint64* stack_pg = (uint64*)PGROUNDDOWN((uint64)curr_fp);
+  uint64 curr_fp = r_fp();
+  uint64 stack_pg = PGROUNDDOWN(curr_fp);
   int ret_addr_offset = -8;
   int fp_offset = -16;
 
   printf("backtrace:\n");
   for (;;) {
-    uint64* ret_addr_ptr = (uint64*)((uint64)curr_fp + ret_addr_offset);
+    uint64* ret_addr_ptr = (uint64*)(curr_fp + ret_addr_offset);
     printf("0x%lx\n", *ret_addr_ptr);
 
-    uint64** fp_ptr = (uint64**)((uint64)curr_fp + fp_offset);
-    if (PGROUNDDOWN((uint64)*fp_ptr) > (uint64)stack_pg) {
+    uint64* fp_ptr = (uint64*)(curr_fp + fp_offset);
+    if (PGROUNDDOWN(*fp_ptr) > stack_pg) {
       break;
     }
     curr_fp = *fp_ptr;
