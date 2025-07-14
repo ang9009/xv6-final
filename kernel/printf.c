@@ -25,14 +25,12 @@ static struct {
 
 static char digits[] = "0123456789abcdef";
 
-static void
-printint(long long xx, int base, int sign)
-{
+static void printint(long long xx, int base, int sign) {
   char buf[16];
   int i;
   unsigned long long x;
 
-  if(sign && (sign = (xx < 0)))
+  if (sign && (sign = (xx < 0)))
     x = -xx;
   else
     x = xx;
@@ -40,18 +38,16 @@ printint(long long xx, int base, int sign)
   i = 0;
   do {
     buf[i++] = digits[x % base];
-  } while((x /= base) != 0);
+  } while ((x /= base) != 0);
 
-  if(sign)
+  if (sign)
     buf[i++] = '-';
 
-  while(--i >= 0)
+  while (--i >= 0)
     consputc(buf[i]);
 }
 
-static void
-printptr(uint64 x)
-{
+static void printptr(uint64 x) {
   int i;
   consputc('0');
   consputc('x');
@@ -59,63 +55,82 @@ printptr(uint64 x)
     consputc(digits[x >> (sizeof(uint64) * 8 - 4)]);
 }
 
+void backtrace() {
+  uint64* curr_fp = (uint64*)r_fp();
+  uint64* stack_pg = (uint64*)PGROUNDDOWN((uint64)curr_fp);
+  int ret_addr_offset = -8;
+  int fp_offset = -16;
+
+  printf("backtrace:\n");
+  for (;;) {
+    uint64* ret_addr_ptr = (uint64*)((uint64)curr_fp + ret_addr_offset);
+    printf("0x%lx\n", *ret_addr_ptr);
+
+    uint64** fp_ptr = (uint64**)((uint64)curr_fp + fp_offset);
+    if (PGROUNDDOWN((uint64)*fp_ptr) > (uint64)stack_pg) {
+      break;
+    }
+    curr_fp = *fp_ptr;
+  }
+}
+
 // Print to the console.
-int
-printf(char *fmt, ...)
-{
+int printf(char* fmt, ...) {
   va_list ap;
   int i, cx, c0, c1, c2, locking;
-  char *s;
+  char* s;
 
   locking = pr.locking;
-  if(locking)
+  if (locking)
     acquire(&pr.lock);
 
   va_start(ap, fmt);
-  for(i = 0; (cx = fmt[i] & 0xff) != 0; i++){
-    if(cx != '%'){
+  for (i = 0; (cx = fmt[i] & 0xff) != 0; i++) {
+    if (cx != '%') {
       consputc(cx);
       continue;
     }
     i++;
-    c0 = fmt[i+0] & 0xff;
+    c0 = fmt[i + 0] & 0xff;
     c1 = c2 = 0;
-    if(c0) c1 = fmt[i+1] & 0xff;
-    if(c1) c2 = fmt[i+2] & 0xff;
-    if(c0 == 'd'){
+    if (c0)
+      c1 = fmt[i + 1] & 0xff;
+    if (c1)
+      c2 = fmt[i + 2] & 0xff;
+    if (c0 == 'd') {
       printint(va_arg(ap, int), 10, 1);
-    } else if(c0 == 'l' && c1 == 'd'){
+    } else if (c0 == 'l' && c1 == 'd') {
       printint(va_arg(ap, uint64), 10, 1);
       i += 1;
-    } else if(c0 == 'l' && c1 == 'l' && c2 == 'd'){
+    } else if (c0 == 'l' && c1 == 'l' && c2 == 'd') {
       printint(va_arg(ap, uint64), 10, 1);
       i += 2;
-    } else if(c0 == 'u'){
+    } else if (c0 == 'u') {
       printint(va_arg(ap, int), 10, 0);
-    } else if(c0 == 'l' && c1 == 'u'){
+    } else if (c0 == 'l' && c1 == 'u') {
       printint(va_arg(ap, uint64), 10, 0);
       i += 1;
-    } else if(c0 == 'l' && c1 == 'l' && c2 == 'u'){
+    } else if (c0 == 'l' && c1 == 'l' && c2 == 'u') {
       printint(va_arg(ap, uint64), 10, 0);
       i += 2;
-    } else if(c0 == 'x'){
+    } else if (c0 == 'x') {
       printint(va_arg(ap, int), 16, 0);
-    } else if(c0 == 'l' && c1 == 'x'){
+    } else if (c0 == 'l' && c1 == 'x') {
       printint(va_arg(ap, uint64), 16, 0);
       i += 1;
-    } else if(c0 == 'l' && c1 == 'l' && c2 == 'x'){
+    } else if (c0 == 'l' && c1 == 'l' && c2 == 'x') {
       printint(va_arg(ap, uint64), 16, 0);
       i += 2;
-    } else if(c0 == 'p'){
+    } else if (c0 == 'p') {
       printptr(va_arg(ap, uint64));
-    } else if(c0 == 's'){
-      if((s = va_arg(ap, char*)) == 0)
+    } else if (c0 == 's') {
+      if ((s = va_arg(ap, char*)) == 0)
         s = "(null)";
-      for(; *s; s++)
+      for (; *s; s++)
         consputc(*s);
-    } else if(c0 == '%'){
+    } else if (c0 == '%') {
       consputc('%');
-    } else if(c0 == 0){
+    } else if (c0 == 0) {
       break;
     } else {
       // Print unknown % sequence to draw attention.
@@ -153,26 +168,23 @@ printf(char *fmt, ...)
   }
   va_end(ap);
 
-  if(locking)
+  if (locking)
     release(&pr.lock);
 
   return 0;
 }
 
-void
-panic(char *s)
-{
+void panic(char* s) {
   pr.locking = 0;
   printf("panic: ");
   printf("%s\n", s);
-  panicked = 1; // freeze uart output from other CPUs
-  for(;;)
+  panicked = 1;  // freeze uart output from other CPUs
+  backtrace();
+  for (;;)
     ;
 }
 
-void
-printfinit(void)
-{
+void printfinit(void) {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
