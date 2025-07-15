@@ -6,6 +6,22 @@
 #include "spinlock.h"
 #include "proc.h"
 
+uint64 sys_sigalarm(void) {
+  int ticks;
+  uint64 handler;
+  argint(0, &ticks);
+  argaddr(1, &handler);
+
+  struct proc* p = myproc();
+  p->handler_addr = handler;
+  p->alarm_interval = ticks;
+  return 0;
+}
+
+uint64 sys_sigreturn(void) {
+  return 0;
+}
+
 uint64 sys_exit(void) {
   int n;
   argint(0, &n);
