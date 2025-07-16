@@ -153,6 +153,17 @@ static void freeproc(struct proc* p) {
   if (p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
+  // Alarm helpers
+  p->alarm_interval = 0;
+  p->handler_addr = 0;
+  p->ticks_elapsed = 0;
+  if (p->prev_trapframe) {
+    kfree((void*)p->prev_trapframe);
+  }
+  p->prev_trapframe = 0;
+  p->handler_schedled = 0;
+
   if (p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
