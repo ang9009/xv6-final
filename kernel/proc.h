@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -109,4 +111,6 @@ struct proc {
   int alarm_interval;
   uint64 handler_addr;
   int ticks_elapsed;  // How many ticks have elapsed since the last call to the alarm handler
+  struct trapframe* prev_trapframe;
+  bool handler_schedled;  // if the handler has already been scheduled
 };

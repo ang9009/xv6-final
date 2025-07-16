@@ -19,7 +19,10 @@ uint64 sys_sigalarm(void) {
 }
 
 uint64 sys_sigreturn(void) {
-  return 0;
+  struct proc* p = myproc();
+  memmove(p->trapframe, p->prev_trapframe, sizeof(struct trapframe));
+  p->handler_schedled = false;
+  return p->trapframe->a0;
 }
 
 uint64 sys_exit(void) {

@@ -72,12 +72,18 @@ void usertrap(void) {
 
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2) {
-    // Alarm logic
-    p->ticks_elapsed = ticks - p->ticks_elapsed;
-    if ((p->handler_addr != 0 || p->alarm_interval != 0) &&
-        p->ticks_elapsed >= p->alarm_interval) {
-      p->trapframe->epc = p->handler_addr;
-      p->ticks_elapsed = 0;
+    if (p->handler_schedled) {
+      // Do nothing
+    } else {
+      // Alarm logic
+      p->ticks_elapsed = ticks - p->ticks_elapsed;
+      if ((p->handler_addr != 0 || p->alarm_interval != 0) &&
+          p->ticks_elapsed >= p->alarm_interval) {
+        memmove(p->prev_trapframe, p->trapframe, sizeof(struct trapframe));
+        p->trapframe->epc = p->handler_addr;
+        p->handler_schedled = true;
+        p->ticks_elapsed = 0;
+      }
     }
 
     yield();
