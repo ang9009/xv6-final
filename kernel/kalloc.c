@@ -8,13 +8,12 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
-
-static int pageref_count[PHYSTOP / PGSIZE];
+#include <stdbool.h>
 
 void freerange(void* pa_start, void* pa_end);
 
 extern char end[];  // first address after kernel.
-                    // defined by kernel.ld.
+// defined by kernel.ld.
 
 struct run {
   struct run* next;
@@ -23,17 +22,17 @@ struct run {
 struct {
   struct spinlock lock;
   struct run* freelist;
+  int pageref_count[PHYSTOP / PGSIZE];
 } kmem;
 
 void kinit() {
   initlock(&kmem.lock, "kmem");
-
   freerange(end, (void*)PHYSTOP);
 }
 
-// Updates page reference table. If the last reference to a page is removed, the
+// Atomically updates page reference table. If the last reference to a page is removed, the
 // page will be freed.
-void update_pageref(bool increment, uint64 pa, bool do_free) {
+void update_pageref(bool increment, uint64 pa) {
   if (pa % PGSIZE != 0) {
     panic("update_pageref(): address not page-aligned");
   }
@@ -41,17 +40,22 @@ void update_pageref(bool increment, uint64 pa, bool do_free) {
   int i = pa / PGSIZE;
   if (i < 0 || i >= PHYSTOP / PGSIZE) {
     panic("update_pageref(): address out of bounds");
-  } else if (!increment && pageref_count[i] <= 0) {
-    return;
   }
 
-  bool free;
-  increment ? pageref_count[i]++ : pageref_count[i]--;
-  free = pageref_count[i] == 0;
-
-  if (do_free && free) {
-    kfree((void*)pa);
+  acquire(&kmem.lock);
+  if (!increment) {
+    if (kmem.pageref_count[i] <= 0) {
+      panic(
+          "update_pageref(): tried to set page reference count to negative "
+          "value");
+    } else if (kmem.pageref_count[i] == 1) {
+      release(&kmem.lock);
+      kfree((void*)pa);
+      return;
+    }
   }
+  increment ? kmem.pageref_count[i]++ : kmem.pageref_count[i]--;
+  release(&kmem.lock);
 }
 
 void freerange(void* pa_start, void* pa_end) {
@@ -71,12 +75,21 @@ void kfree(void* pa) {
   if (((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&kmem.lock);
+  int i = (uint64)pa / PGSIZE;
+  if (kmem.pageref_count[i] > 1) {
+    kmem.pageref_count[i]--;
+    release(&kmem.lock);
+    return;
+  } else if (kmem.pageref_count[i] < 0) {
+    panic("kfree(): negative pageref count");
+  }
+
+  kmem.pageref_count[i] = 0;
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
-
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -90,13 +103,14 @@ void* kalloc(void) {
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if (r)
+  if (r) {
     kmem.freelist = r->next;
+    kmem.pageref_count[(uint64)r / PGSIZE] = 1;
+  }
   release(&kmem.lock);
 
   if (r) {
     memset((char*)r, 5, PGSIZE);  // fill with junk
-    update_pageref(true, (uint64)r, false);
   }
 
   return (void*)r;

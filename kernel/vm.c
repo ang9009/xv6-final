@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -176,10 +177,10 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) {
       panic("uvmunmap: not mapped");
     if (PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-
-    uint64 pa = PTE2PA(*pte);
-    update_pageref(false, pa, do_free);
-
+    if (do_free) {
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
     *pte = 0;
   }
 }
@@ -300,13 +301,11 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
     uint cow_flags = PTE_COW | ((flags & PTE_W) ? PTE_COW_W : 0);
     // Clear writable flag, add cow flags
     uint new_flags = (flags & ~PTE_W) | cow_flags;
-
     if (mappages(new, i, PGSIZE, pa, new_flags) != 0) {
       goto err;
     }
-
-    *pte = PA2PTE(pa) | new_flags;  // Modify original PTE
-    update_pageref(true, pa, true);
+    *pte = PTE_ADDR(*pte) | new_flags;  // Modify original PTE
+    update_pageref(true, pa);
   }
   return 0;
 
@@ -326,6 +325,12 @@ void uvmclear(pagetable_t pagetable, uint64 va) {
   *pte &= ~PTE_U;
 }
 
+extern struct {
+  struct spinlock lock;
+  struct run* freelist;
+  int pageref_count[PHYSTOP / PGSIZE];
+} kmem;
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -341,6 +346,15 @@ int copyout(pagetable_t pagetable, uint64 dstva, char* src, uint64 len) {
     if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
         (*pte & PTE_W) == 0)
       return -1;
+
+    if ((*pte & PTE_COW)) {
+      if (!(*pte & PTE_COW_W)) {
+        panic("copyout(): tried to write to non-writeable COW page");
+      } else {
+        handle_cow(pte);
+      }
+    }
+
     pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
     if (n > len)

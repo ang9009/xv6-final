@@ -25,6 +25,12 @@ void trapinithart(void) {
   w_stvec((uint64)kernelvec);
 }
 
+extern struct {
+  struct spinlock lock;
+  struct run* freelist;
+  int pageref_count[PHYSTOP / PGSIZE];
+} kmem;
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -59,6 +65,17 @@ void usertrap(void) {
     intr_on();
 
     syscall();
+  } else if (r_scause() == 15) {  // Write page fault
+    uint64 va = r_stval();
+    pte_t* pte_p;
+    if ((pte_p = walk(p->pagetable, va, 0)) == 0) {
+      panic("usertrap(): could not find PTE associated with faulting address");
+    }
+    if (!(*pte_p & PTE_COW) || !(*pte_p & PTE_COW_W) || !(*pte_p & PTE_V)) {
+      panic("usertrap(): tried to write to non-cow/non-writable page");
+    }
+
+    handle_cow(pte_p);
   } else if ((which_dev = devintr()) != 0) {
     // ok
   } else {
@@ -75,6 +92,34 @@ void usertrap(void) {
     yield();
 
   usertrapret();
+}
+
+void handle_cow(pte_t* pte_p) {
+  uint64 oldpg_pa = PTE2PA(*pte_p);
+  // Add writable flag and clear COW flags
+  uint64 new_flags = (PTE_FLAGS(*pte_p) | PTE_W) & ~(PTE_COW | PTE_COW_W);
+
+  acquire(&kmem.lock);
+  if (kmem.pageref_count[oldpg_pa / PGSIZE] ==
+      1) {  // if this is the last reference, make it writeable
+    pte_t new_pte = PTE_ADDR(*pte_p) | new_flags;
+    *pte_p = new_pte;
+    release(&kmem.lock);
+    return;
+  }
+  release(&kmem.lock);
+
+  // If this is not the last reference, copy to new
+  uint64 newpg_pa = (uint64)kalloc();
+  if (newpg_pa == 0) {
+    panic("usertrap(): could not allocate");
+  }
+  memmove((void*)newpg_pa, (void*)oldpg_pa, PGSIZE);
+
+  pte_t new_pte = PA2PTE(newpg_pa) | new_flags;
+  *pte_p = new_pte;
+
+  update_pageref(false, oldpg_pa);
 }
 
 //
