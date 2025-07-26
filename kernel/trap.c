@@ -68,11 +68,18 @@ void usertrap(void) {
   } else if (r_scause() == 15) {  // Write page fault
     uint64 va = r_stval();
     pte_t* pte_p;
+    if (va >= MAXVA) {
+      p->killed = 1;
+      goto handle_killed;
+    }
+
     if ((pte_p = walk(p->pagetable, va, 0)) == 0) {
-      panic("usertrap(): could not find PTE associated with faulting address");
+      p->killed = 1;
+      goto handle_killed;
     }
     if (!(*pte_p & PTE_COW) || !(*pte_p & PTE_COW_W) || !(*pte_p & PTE_V)) {
-      panic("usertrap(): tried to write to non-cow/non-writable page");
+      p->killed = 1;
+      goto handle_killed;
     }
 
     handle_cow(pte_p);
@@ -84,6 +91,7 @@ void usertrap(void) {
     setkilled(p);
   }
 
+handle_killed:
   if (killed(p))
     exit(-1);
 
