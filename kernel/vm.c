@@ -343,13 +343,14 @@ int copyout(pagetable_t pagetable, uint64 dstva, char* src, uint64 len) {
     if (va0 >= MAXVA)
       return -1;
     pte = walk(pagetable, va0, 0);
-    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-        (*pte & PTE_W) == 0)
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
       return -1;
 
-    if ((*pte & PTE_COW)) {
+    if (!(*pte & PTE_W) && !(*pte & PTE_COW)) {
+      return -1;
+    } else if ((*pte & PTE_COW)) {
       if (!(*pte & PTE_COW_W)) {
-        panic("copyout(): tried to write to non-writeable COW page");
+        return -1;
       } else {
         handle_cow(pte);
       }
@@ -365,6 +366,7 @@ int copyout(pagetable_t pagetable, uint64 dstva, char* src, uint64 len) {
     src += n;
     dstva = va0 + PGSIZE;
   }
+
   return 0;
 }
 

@@ -109,10 +109,11 @@ void handle_cow(pte_t* pte_p) {
   }
   release(&kmem.lock);
 
-  // If this is not the last reference, copy to new
+  // If this is not the last reference, copy to new page
   uint64 newpg_pa = (uint64)kalloc();
   if (newpg_pa == 0) {
-    panic("usertrap(): could not allocate");
+    printf("handle_cow(): could not allocate memory\n");
+    exit(-1);
   }
   memmove((void*)newpg_pa, (void*)oldpg_pa, PGSIZE);
 
