@@ -111,19 +111,32 @@ int e1000_transmit(char* buf, int len) {
   // Update ring position
   regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
   release(&e1000_lock);
-  printf("success\n");
 
   return 0;
 }
 
 static void e1000_recv(void) {
-  printf("receive\n");
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver a buf for each packet (using net_rx()).
-  //
+  acquire(&e1000_lock);
+  uint32 next_idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+
+  while (1) {
+    struct rx_desc* desc = &rx_ring[next_idx];
+    uint8 desc_done = desc->status & E1000_RXD_STAT_DD;
+    if (!desc_done) {
+      break;
+    }
+    net_rx((char*)desc->addr, desc->length);
+
+    desc->addr = (uint64)kalloc();
+    if (!desc->addr) {
+      panic("e1000_recv: failed to allocate buffer\n");
+    }
+    desc->status = 0;
+    regs[E1000_RDT] = next_idx;
+
+    next_idx = (next_idx + 1) % RX_RING_SIZE;
+  }
+  release(&e1000_lock);
 }
 
 void e1000_intr(void) {
