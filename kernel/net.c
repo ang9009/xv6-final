@@ -19,6 +19,21 @@ static uint8 host_mac[ETHADDR_LEN] = {0x52, 0x55, 0x0a, 0x00, 0x02, 0x02};
 
 static struct spinlock netlock;
 
+struct packet_node {
+  char* buf;
+  uint32 src_ip;
+  short src_port;
+  struct packet_node* next;
+};
+
+struct port_data {
+  struct packet_node* packet_queue;
+  int queue_len;
+  int bound;  // Whether bind() has been called on this
+};
+
+static struct port_data ports[65536];  // Indexed by port number
+
 void netinit(void) {
   initlock(&netlock, "netlock");
 }
@@ -65,10 +80,44 @@ uint64 sys_unbind(void) {
 // bind(dport) must previously have been called.
 //
 uint64 sys_recv(void) {
-  //
-  // Your code here.
-  //
-  return -1;
+  int dport, maxlen;
+  int* src;
+  short* sport;
+  char* buf;
+
+  argint(0, &dport);
+  argaddr(1, &src);
+  argaddr(2, &sport);
+  argaddr(3, &buf);
+  argint(4, &maxlen);
+
+  acquire(&netlock);
+
+  struct port_data* data = &ports[dport];
+  if (!data->bound) {
+    release(&netlock);
+    return -1;
+  }
+
+  if (data->packet_queue) {
+    const struct packet_node* node = data->packet_queue;
+    data->packet_queue = data->packet_queue->next;
+
+    const struct proc* p = myproc();
+    pagetable_t pt = p->pagetable;
+    copyout(pt, (uint64)src, (char*)&node->src_ip, sizeof(uint32));
+    copyout(pt, (uint64)sport, (char*)&node->src_port, sizeof(short));
+    copyout(pt, (uint64)buf, (char*)&node->buf, maxlen);
+
+    release(&netlock);
+    return 0;
+  }
+  // ! Fix byte order
+  // ! Implement waiting
+
+  release(&netlock);
+
+  return 0;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
