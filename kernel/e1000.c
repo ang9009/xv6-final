@@ -125,7 +125,10 @@ static void e1000_recv(void) {
     if (!desc_done) {
       break;
     }
+
+    release(&e1000_lock);
     net_rx((char*)desc->addr, desc->length);
+    acquire(&e1000_lock);
 
     desc->addr = (uint64)kalloc();
     if (!desc->addr) {
