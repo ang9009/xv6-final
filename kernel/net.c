@@ -51,8 +51,14 @@ uint64 sys_bind(void) {
   // Your code here.
   //
   // ! Make sure yoy update portdata -> bound here
+  int port;
+  argint(0, &port);
+  if (ports[port].bound) {
+    panic("sys_bind(): tried to bind port that has already been bound");
+  }
+  ports[port].bound = 1;
 
-  return -1;
+  return 0;
 }
 
 //
@@ -64,6 +70,7 @@ uint64 sys_unbind(void) {
   //
   // Optional: Your code here.
   //
+  // ! Make sure yoy update portdata -> bound here
 
   return 0;
 }
@@ -122,6 +129,8 @@ uint64 sys_recv(void) {
   uint64 bytes_copied = node->payload_len > maxlen ? maxlen : node->payload_len;
   copyout(pt, (uint64)buf, (char*)&node->payload, bytes_copied);
 
+  kfree((void*)node);
+  kfree((void*)buf);
   release(&netlock);
 
   return 0;
@@ -232,7 +241,7 @@ void ip_rx(char* buf, int len) {
   const struct ip ip_header = *((struct ip*)(buf + sizeof(struct eth)));
   if (ip_header.ip_p !=
       IPPROTO_UDP) {  // IP protocol is 1 byte long, no translation needed
-    return;
+    goto err;
   }
 
   const struct udp udp_header =
@@ -241,7 +250,7 @@ void ip_rx(char* buf, int len) {
   struct port_data* port_info = &ports[port];
   // Not already processed by bind(), or queue full
   if (!port_info->bound || (port_info->queue_len == MAX_PACKET_Q_LEN)) {
-    return;
+    goto err;
   }
 
   // Add new packet to queue
@@ -263,6 +272,10 @@ void ip_rx(char* buf, int len) {
   port_info->packet_queue = &packet;
 
   port_info->queue_len++;
+
+err:
+  kfree((void*)buf);
+  return;
 }
 
 //
