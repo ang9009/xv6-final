@@ -64,6 +64,8 @@ struct udp {
   uint16 sum;    // checksum
 };
 
+#define MAX_PACKET_Q_LEN 16
+
 // an ARP packet (comes after an Ethernet header).
 struct arp {
   uint16 hrd;  // format of hardware address

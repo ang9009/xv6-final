@@ -50,6 +50,7 @@ uint64 sys_bind(void) {
   //
   // Your code here.
   //
+  // ! Make sure yoy update portdata -> bound here
 
   return -1;
 }
@@ -229,7 +230,8 @@ void ip_rx(char* buf, int len) {
   seen_ip = 1;
 
   const struct ip ip_header = *((struct ip*)(buf + sizeof(struct eth)));
-  if (ip_header.ip_p != 17) {  // If protocol is not UDP
+  if (ip_header.ip_p !=
+      IPPROTO_UDP) {  // IP protocol is 1 byte long, no translation needed
     return;
   }
 
@@ -237,8 +239,8 @@ void ip_rx(char* buf, int len) {
       *((struct udp*)(buf + sizeof(struct eth) + sizeof(struct ip)));
   uint16 port = ntohs(udp_header.dport);
   struct port_data* port_info = &ports[port];
-  // Already processed by bind(), or queue full
-  if (port_info->bound || (port_info->queue_len == 16)) {
+  // Not already processed by bind(), or queue full
+  if (!port_info->bound || (port_info->queue_len == MAX_PACKET_Q_LEN)) {
     return;
   }
 
@@ -247,16 +249,19 @@ void ip_rx(char* buf, int len) {
   if (!packet) {
     panic("ip_rx(): kalloc failed");
   }
+  const char* payload =
+      *(buf + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp));
+  const int payload_len =
+      len - sizeof(struct eth) - sizeof(struct ip) - sizeof(struct udp);
   *packet = (struct packet_node){
       .next = port_info->packet_queue,
       .payload = buf,
-      .payload_len = ntohs(udp_header.ulen),
+      .payload_len = payload_len,
       .src_ip = ntohl(ip_header.ip_src),
       .src_port = ntohs(udp_header.sport),
   };
   port_info->packet_queue = &packet;
 
-  port_info->bound = 1;
   port_info->queue_len++;
 }
 
