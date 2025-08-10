@@ -20,18 +20,21 @@ static uint8 host_mac[ETHADDR_LEN] = {0x52, 0x55, 0x0a, 0x00, 0x02, 0x02};
 static struct spinlock netlock;
 
 struct packet_node {
-  char* buf;
+  char* payload;
+  uint16 payload_len;
   uint32 src_ip;
-  short src_port;
+  uint16 src_port;
   struct packet_node* next;
 };
 
+// Data placed here must be in little-endian
 struct port_data {
   struct packet_node* packet_queue;
   int queue_len;
-  int bound;  // Whether bind() has been called on this
+  int bound;  // Whether bind() has been called on this port
 };
 
+// Data placed here must be in little-endian
 static struct port_data ports[65536];  // Indexed by port number
 
 void netinit(void) {
@@ -99,21 +102,24 @@ uint64 sys_recv(void) {
     return -1;
   }
 
-  if (data->packet_queue) {
-    const struct packet_node* node = data->packet_queue;
-    data->packet_queue = data->packet_queue->next;
-
-    const struct proc* p = myproc();
-    pagetable_t pt = p->pagetable;
-    copyout(pt, (uint64)src, (char*)&node->src_ip, sizeof(uint32));
-    copyout(pt, (uint64)sport, (char*)&node->src_port, sizeof(short));
-    copyout(pt, (uint64)buf, (char*)&node->buf, maxlen);
-
-    release(&netlock);
-    return 0;
+  while (!data->packet_queue) {
+    sleep((void*)&data->packet_queue, &netlock);
   }
-  // ! Fix byte order
-  // ! Implement waiting
+
+  // Remove packet from head of packet queue
+  const struct packet_node* node = data->packet_queue;
+  data->packet_queue = data->packet_queue->next;
+  data->queue_len--;
+  if (data->queue_len < 0) {
+    panic("sys_recv(): packet queue length is negative");
+  }
+  const struct proc* p = myproc();
+  pagetable_t pt = p->pagetable;
+
+  copyout(pt, (uint64)src, (char*)&node->src_ip, sizeof(uint32));
+  copyout(pt, (uint64)sport, (char*)&node->src_port, sizeof(uint16));
+  uint64 bytes_copied = node->payload_len > maxlen ? maxlen : node->payload_len;
+  copyout(pt, (uint64)buf, (char*)&node->payload, bytes_copied);
 
   release(&netlock);
 
@@ -222,9 +228,36 @@ void ip_rx(char* buf, int len) {
     printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
-  //
-  // Your code here.
-  //
+  const struct ip ip_header = *((struct ip*)(buf + sizeof(struct eth)));
+  if (ip_header.ip_p != 17) {  // If protocol is not UDP
+    return;
+  }
+
+  const struct udp udp_header =
+      *((struct udp*)(buf + sizeof(struct eth) + sizeof(struct ip)));
+  uint16 port = ntohs(udp_header.dport);
+  struct port_data* port_info = &ports[port];
+  // Already processed by bind(), or queue full
+  if (port_info->bound || (port_info->queue_len == 16)) {
+    return;
+  }
+
+  // Add new packet to queue
+  struct packet_node* packet = kalloc();
+  if (!packet) {
+    panic("ip_rx(): kalloc failed");
+  }
+  *packet = (struct packet_node){
+      .next = port_info->packet_queue,
+      .payload = buf,
+      .payload_len = ntohs(udp_header.ulen),
+      .src_ip = ntohl(ip_header.ip_src),
+      .src_port = ntohs(udp_header.sport),
+  };
+  port_info->packet_queue = &packet;
+
+  port_info->bound = 1;
+  port_info->queue_len++;
 }
 
 //
