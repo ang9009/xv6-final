@@ -50,7 +50,6 @@ uint64 sys_bind(void) {
   //
   // Your code here.
   //
-  // ! Make sure yoy update portdata -> bound here
   int port;
   argint(0, &port);
   if (ports[port].bound) {
@@ -97,15 +96,15 @@ uint64 sys_recv(void) {
   char* buf;
 
   argint(0, &dport);
-  argaddr(1, &src);
-  argaddr(2, &sport);
-  argaddr(3, &buf);
+  argaddr(1, (uint64*)&src);
+  argaddr(2, (uint64*)&sport);
+  argaddr(3, (uint64*)&buf);
   argint(4, &maxlen);
 
   acquire(&netlock);
 
   struct port_data* data = &ports[dport];
-  if (!data->bound) {
+  if (!data->bound) {  // ! Free?
     release(&netlock);
     return -1;
   }
@@ -127,13 +126,15 @@ uint64 sys_recv(void) {
   copyout(pt, (uint64)src, (char*)&node->src_ip, sizeof(uint32));
   copyout(pt, (uint64)sport, (char*)&node->src_port, sizeof(uint16));
   uint64 bytes_copied = node->payload_len > maxlen ? maxlen : node->payload_len;
-  copyout(pt, (uint64)buf, (char*)&node->payload, bytes_copied);
+  // printf("sys_recv(): from port %d, payload_len: %d, maxlen: %d\n", dport,
+  //        node->payload_len, maxlen);
+  copyout(pt, (uint64)buf, (char*)node->payload, bytes_copied);
 
+  kfree((void*)node->payload);
   kfree((void*)node);
-  kfree((void*)buf);
   release(&netlock);
 
-  return 0;
+  return bytes_copied;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -246,32 +247,49 @@ void ip_rx(char* buf, int len) {
 
   const struct udp udp_header =
       *((struct udp*)(buf + sizeof(struct eth) + sizeof(struct ip)));
-  uint16 port = ntohs(udp_header.dport);
-  struct port_data* port_info = &ports[port];
+  uint16 dport = ntohs(udp_header.dport);
+
+  acquire(&netlock);
+  struct port_data* port_info = &ports[dport];
   // Not already processed by bind(), or queue full
   if (!port_info->bound || (port_info->queue_len == MAX_PACKET_Q_LEN)) {
+    release(&netlock);
     goto err;
   }
 
-  // Add new packet to queue
+  const int payload_len = ntohs(udp_header.ulen) - sizeof(struct udp);
+  char* payload_src =
+      (buf + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp));
+  char* payload_dst = kalloc();
+  memmove((void*)payload_dst, (void*)payload_src, payload_len);
+
   struct packet_node* packet = kalloc();
   if (!packet) {
     panic("ip_rx(): kalloc failed");
   }
-  const char* payload =
-      *(buf + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp));
-  const int payload_len =
-      len - sizeof(struct eth) - sizeof(struct ip) - sizeof(struct udp);
   *packet = (struct packet_node){
-      .next = port_info->packet_queue,
-      .payload = buf,
+      .next = (void*)0,  // Packet is new tail
+      .payload = payload_dst,
       .payload_len = payload_len,
       .src_ip = ntohl(ip_header.ip_src),
       .src_port = ntohs(udp_header.sport),
   };
-  port_info->packet_queue = &packet;
+
+  // Add packet to queue
+  if (!port_info->packet_queue) {
+    port_info->packet_queue = packet;
+  } else {
+    struct packet_node* tail = port_info->packet_queue;
+    while (tail->next) {
+      tail = tail->next;
+    }
+    tail->next = packet;
+  }
 
   port_info->queue_len++;
+
+  release(&netlock);
+  wakeup((void*)&port_info->packet_queue);
 
 err:
   kfree((void*)buf);

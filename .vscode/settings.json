@@ -7,6 +7,7 @@
         "memory": "c",
         "param.h": "c",
         "semaphore": "c",
-        "stop_token": "c"
+        "stop_token": "c",
+        "cstring": "c"
     }
 }
