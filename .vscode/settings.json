@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "spinlock.h": "c",
-        "random": "c"
-    }
+        "random": "c",
+        "mutex": "c"
+    },
+    "idf.pythonInstallPath": "/usr/bin/python3"
 }
