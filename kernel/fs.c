@@ -419,7 +419,7 @@ bmap(struct inode *ip, uint bn)
   bn -= NSINDIRECT;
 
   if (bn < NDINDIRECT) { // Doubly indirect block
-    if ((addr = ip->addrs[NDINDIRECT_IDX]) == 0) {
+    if ((addr = ip->addrs[NDINDIRECT_IDX]) == 0) { // Load indirect block and allocate if necessary
       addr = balloc(ip->dev);
       if (addr == 0) {
         return 0;
@@ -427,22 +427,23 @@ bmap(struct inode *ip, uint bn)
       ip->addrs[NDINDIRECT_IDX] = addr;
     }
     
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data; // Doubly indirect block contents
+    bp = bread(ip->dev, addr); // Read in doubly indirect block
+    a = (uint*)bp->data; 
     uint outer_idx = bn / NSINDIRECT; // Find singly indirect block bn belongs to
     if ((addr = a[outer_idx]) == 0) {
       addr = balloc(ip->dev);
       if (addr) {
         a[outer_idx] = addr;
         log_write(bp);
-      } else {
-        return 0;
       }
     }
     brelse(bp);
+    if (!addr) {
+      return 0;
+    }
 
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data; // Singly indirect block contents
+    bp = bread(ip->dev, addr); // Read in singly indirect block
+    a = (uint*)bp->data; 
     uint inner_idx = bn % NSINDIRECT; // Find block number corresponding to bn in singly indirect block
     if ((addr = a[inner_idx]) == 0) {
       addr = balloc(ip->dev);
