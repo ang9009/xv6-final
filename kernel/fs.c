@@ -429,7 +429,6 @@ bmap(struct inode *ip, uint bn)
     
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data; // Doubly indirect block contents
-
     uint outer_idx = bn / NSINDIRECT; // Find singly indirect block bn belongs to
     if ((addr = a[outer_idx]) == 0) {
       addr = balloc(ip->dev);
@@ -440,6 +439,7 @@ bmap(struct inode *ip, uint bn)
         return 0;
       }
     }
+    brelse(bp);
 
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data; // Singly indirect block contents
@@ -501,6 +501,8 @@ itrunc(struct inode *ip)
           bfree(ip->dev, inner_a[m]); 
         }
       }
+
+      brelse(inner_bp);
       bfree(ip->dev, a[k]); // Free the singly indirect block
     }
     brelse(bp);
