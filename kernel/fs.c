@@ -497,7 +497,7 @@ itrunc(struct inode *ip)
       struct buf *inner_bp = bread(ip->dev, a[k]); // Singly indirect block
       uint *inner_a = (uint*)inner_bp->data;
 
-      for (int m = 0; m < NSINDIRECT; m++) { // Free all used doubly indirect blocks in the singly indirect block
+      for (int m = 0; m < NSINDIRECT; m++) { // Free all used doubly indirect blocks referenced by the singly indirect block
         if (inner_a[m]) {
           bfree(ip->dev, inner_a[m]); 
         }

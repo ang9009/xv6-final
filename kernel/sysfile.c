@@ -169,6 +169,28 @@ bad:
   return -1;
 }
 
+uint64 sys_symlink(void) {
+  char target[MAXPATH];
+  char path[MAXPATH];
+
+  if (argstr(0, target, MAXPATH) < 0 || argstr(0, path, MAXPATH)) {
+    return -1;
+  }
+
+  struct inode *ip;
+
+  begin_op();
+  if ((ip = namei(path)) == 0) {
+    end_op();
+    return -1;
+  }
+  
+  ilock(ip);
+  // ! Need to increase nlink for the target here somewhere
+
+  end_op();
+}
+
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
