@@ -186,7 +186,7 @@ uint64 sys_symlink(void) {
   }
   
   ilock(ip);
-  // ! Need to increase nlink for the target here somewhere
+  // ! Need to increase nlink for the target
 
   end_op();
 }
