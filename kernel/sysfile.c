@@ -177,18 +177,27 @@ uint64 sys_symlink(void) {
     return -1;
   }
 
-  struct inode *ip;
-
+  struct inode *path_ip, *target_ip;
   begin_op();
-  if ((ip = namei(path)) == 0) {
+
+  if ((path_ip = namei(path)) == 0 || (target_ip = namei(target)) == 0) {
     end_op();
     return -1;
   }
+
+  ilock(path_ip);
+  memmove(&path_ip->symlink, target, MAXPATH);
+  iupdate(path_ip);
+  iunlockput(path_ip);
   
-  ilock(ip);
-  // ! Need to increase nlink for the target
+  ilock(target_ip);
+  target_ip->nlink++;
+  iupdate(target_ip);
+  iunlockput(target_ip);
 
   end_op();
+
+  return 0;
 }
 
 // Is the directory dp empty except for "." and ".." ?
