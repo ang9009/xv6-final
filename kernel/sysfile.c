@@ -169,37 +169,6 @@ bad:
   return -1;
 }
 
-uint64 sys_symlink(void) {
-  char target[MAXPATH];
-  char path[MAXPATH];
-
-  if (argstr(0, target, MAXPATH) < 0 || argstr(0, path, MAXPATH)) {
-    return -1;
-  }
-
-  struct inode *path_ip, *target_ip;
-  begin_op();
-
-  if ((path_ip = namei(path)) == 0 || (target_ip = namei(target)) == 0) {
-    end_op();
-    return -1;
-  }
-
-  ilock(path_ip);
-  memmove(&path_ip->symlink, target, MAXPATH);
-  iupdate(path_ip);
-  iunlockput(path_ip);
-  
-  ilock(target_ip);
-  target_ip->nlink++;
-  iupdate(target_ip);
-  iunlockput(target_ip);
-
-  end_op();
-
-  return 0;
-}
-
 // Is the directory dp empty except for "." and ".." ?
 static int
 isdirempty(struct inode *dp)
@@ -350,34 +319,48 @@ sys_open(void)
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
-      end_op();
-      return -1;
+      goto op_only_err;
     }
   } else {
-    if((ip = namei(path)) == 0){
-      end_op();
-      return -1;
+    if((ip = namei(path)) == 0) {
+      goto op_only_err;
     }
+
     ilock(ip);
+    if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) { // Unless no follow specified, follow symlink
+      int depth = 0;
+      while (1) {
+        if (depth > MAXLINKDEPTH) { // Probably a cycle
+          goto unlockput_err;
+        }
+        if (ip->type != T_SYMLINK) {
+          break;
+        }
+        struct inode* temp = ip;
+        if ((ip = namei(ip->symlink)) == 0) {
+          iunlockput(temp); // Unlock previous inode pointer
+          end_op();
+          return -1;
+        }
+        iunlockput(temp);
+        ilock(ip);
+        depth++;
+      }
+    }
+    
     if(ip->type == T_DIR && omode != O_RDONLY){
-      iunlockput(ip);
-      end_op();
-      return -1;
+      goto unlockput_err;
     }
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
-    iunlockput(ip);
-    end_op();
-    return -1;
+    goto unlockput_err;
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
-    iunlockput(ip);
-    end_op();
-    return -1;
+    goto unlockput_err;
   }
 
   if(ip->type == T_DEVICE){
@@ -399,6 +382,15 @@ sys_open(void)
   end_op();
 
   return fd;
+
+unlockput_err:   // release inode + end_op
+    iunlockput(ip);
+    end_op();
+    return -1;
+
+op_only_err:     // only end_op, no inode to release
+    end_op();
+    return -1;
 }
 
 uint64
@@ -532,5 +524,37 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_symlink(void) {
+  char target[MAXPATH];
+  char path[MAXPATH];
+
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) {
+    return -1;
+  }
+
+  struct inode *path_ip, *target_ip;
+  
+  begin_op();
+  if ((path_ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+
+  memmove(&path_ip->symlink, target, MAXPATH);
+  iupdate(path_ip);
+  iunlockput(path_ip);
+  
+  target_ip = namei(target);
+  if (target_ip) {
+    ilock(target_ip);
+    target_ip->nlink++;
+    iupdate(target_ip);
+    iunlockput(target_ip);
+  }
+  end_op();
+
   return 0;
 }

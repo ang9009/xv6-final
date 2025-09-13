@@ -23,6 +23,7 @@
 #endif
 #endif
 #define MAXPATH      128   // maximum file path name
+#define MAXLINKDEPTH 10 // Maximum symlink depth
 
 #ifdef LAB_UTIL
 #define USERSTACK    2     // user stack pages
